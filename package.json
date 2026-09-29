@@ -1,0 +1,24 @@
+{
+  "name": "contentpilot",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=@contentpilot/api",
+    "dev:web": "npm run dev --workspace=@contentpilot/web",
+    "build": "npm run build --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=@contentpilot/api",
+    "db:migrate": "npm run db:migrate --workspace=@contentpilot/api",
+    "db:push": "npm run db:push --workspace=@contentpilot/api",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2"
+  }
+}

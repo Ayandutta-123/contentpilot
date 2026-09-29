@@ -1,0 +1,45 @@
+# Dependencies & build
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Secrets & local env (never commit)
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+**/credentials*.json
+**/service-account*.json
+**/secrets/
+
+# Runtime / local data
+uploads/
+apps/api/uploads/
+data/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+apps/api/prisma/**/dev.db
+apps/api/prisma/**/dev.db-*
+apps/api/prisma/**/dev.db*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker / local overrides
+docker-compose.override.yml

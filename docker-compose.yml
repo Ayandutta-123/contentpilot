@@ -1,0 +1,122 @@
+version: "3.9"
+
+# On-prem / server stack. Values come from `.env` (see `.env.example` + DEPLOY.md).
+# Data that must survive redeploys lives in named volumes: postgres_data, redis_data, uploads_data.
+#
+#   cp .env.example .env   # set WEB_URL, API_URL, secrets, passwords
+#   docker compose up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: contentpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-contentpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contentpilot}
+      POSTGRES_DB: ${POSTGRES_DB:-contentpilot}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-contentpilot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: contentpilot-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: contentpilot-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-4000}:4000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      USE_EMBEDDED_PG: "false"
+      API_HOST: 0.0.0.0
+      API_PORT: ${API_PORT:-4000}
+      # Must match the volume mount below — keeps media across image rebuilds
+      UPLOAD_DIR: /app/uploads
+      DATABASE_URL: postgresql://${POSTGRES_USER:-contentpilot}:${POSTGRES_PASSWORD:-contentpilot}@postgres:5432/${POSTGRES_DB:-contentpilot}
+      REDIS_URL: redis://redis:6379
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      API_URL: ${API_URL:-http://localhost:4000}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Named volume = survives `docker compose up --build` / image updates
+      - uploads_data:/app/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ContentPilot}
+        NEXT_PUBLIC_APP_TAGLINE: ${NEXT_PUBLIC_APP_TAGLINE:-B2B Content Engine}
+        # Build-time rewrite target (Docker service DNS)
+        INTERNAL_API_URL: http://api:4000
+        API_URL: http://api:4000
+    container_name: contentpilot-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      INTERNAL_API_URL: http://api:4000
+      API_URL: http://api:4000
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ContentPilot}
+      NEXT_PUBLIC_APP_TAGLINE: ${NEXT_PUBLIC_APP_TAGLINE:-B2B Content Engine}
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:

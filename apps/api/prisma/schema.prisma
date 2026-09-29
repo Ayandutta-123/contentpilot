@@ -1,0 +1,860 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Soft-delete convention (deletedAt IS NULL = active): used for settings entities
+// (topics, competitors, templates, etc.). Approvals post Delete is a hard delete
+// of GeneratedContent (+ cascaded publish_logs / approval_decisions).
+
+model Tenant {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  users                  User[]
+  memberships            TenantMembership[]
+  topics                 Topic[]
+  competitors            Competitor[]
+  libraryItems           ContentLibraryItem[]
+  newsletterTemplates    NewsletterTemplate[]
+  brandTemplates         BrandTemplate[]
+  playPosterTemplates    PlayPosterTemplate[]
+  brandPosterReferences  BrandPosterReference[]
+  brandSettings          BrandSettings?
+  providerSettings       ProviderSettings?
+  platformConnections    PlatformConnection[]
+  generatedContents      GeneratedContent[]
+  executionLogs          ExecutionLog[]
+  securityLogs           SecurityLog[]
+  notifications          AppNotification[]
+  automationWorkflows    AutomationWorkflow[]
+  contentCalendarPlans   ContentCalendarPlan[]
+  assistantConversations AssistantConversation[]
+  assistantMemories      AssistantMemory[]
+  scrapedDiscoverItems   ScrapedDiscoverItem[]
+
+  @@map("tenants")
+}
+
+enum UserRole {
+  admin
+  reviewer
+  viewer
+}
+
+/// Links a user to one or more companies (tenants). Session.tenantId picks the active one.
+model TenantMembership {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tenantId  String   @map("tenant_id")
+  role      UserRole @default(admin)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("tenant_memberships")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  email        String
+  passwordHash String    @map("password_hash")
+  name         String
+  role         UserRole  @default(viewer)
+  isActive     Boolean   @default(true) @map("is_active")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships       TenantMembership[]
+  approvalDecisions ApprovalDecision[]
+  securityLogs      SecurityLog[]
+
+  @@unique([tenantId, email])
+  @@index([email])
+  @@map("users")
+}
+
+model BrandSettings {
+  id                     String    @id @default(uuid())
+  tenantId               String    @unique @map("tenant_id")
+  companyName            String    @default("") @map("company_name")
+  productName            String    @default("") @map("product_name")
+  productTagline         String    @default("") @map("product_tagline")
+  industry               String    @default("")
+  websiteUrl             String    @default("") @map("website_url")
+  /**
+   * Public contact email for carousel CTA slides (optional; scraped or manual).
+   */
+  contactEmail           String    @default("") @map("contact_email")
+  instagramUrl           String    @default("") @map("instagram_url")
+  facebookUrl            String    @default("") @map("facebook_url")
+  linkedinUrl            String    @default("") @map("linkedin_url")
+  twitterUrl             String    @default("") @map("twitter_url")
+  /**
+   * b2b | b2c — B2B triggers website scrape into voice/guidelines fields
+   */
+  brandType              String    @default("b2b") @map("brand_type")
+  brandVoice             String    @default("") @map("brand_voice")
+  imageStyle             String    @default("") @map("image_style")
+  logoUrl                String?   @map("logo_url")
+  hashtagStrategy        String    @default("") @map("hashtag_strategy")
+  contentGuidelines      String    @default("") @map("content_guidelines")
+  targetAudience         String    @default("") @map("target_audience")
+  /**
+   * Market focus for meme/trend scraping.
+   * ISO-ish codes e.g. ["IN","AE"] or ["worldwide"]. Empty = treat as worldwide.
+   */
+  targetCountries        String[]  @default([]) @map("target_countries")
+  /**
+   * Brand Kit: strict | mix | sometimes | off
+   */
+  brandKitMode           String    @default("mix") @map("brand_kit_mode")
+  /**
+   * Reuse approved poster visual DNA: off | guide | strong
+   */
+  posterReferenceMode    String    @default("off") @map("poster_reference_mode")
+  /**
+   * Aggregated, human-readable visual direction from approved poster references.
+   */
+  posterVisualProfile    String    @default("") @map("poster_visual_profile")
+  /**
+   * Optional tenant memory for AI Assistant. Off by default; users can review
+   * and clear every stored memory from the assistant.
+   */
+  assistantMemoryEnabled Boolean   @default(false) @map("assistant_memory_enabled")
+  primaryColor           String    @default("#0B1F3A") @map("primary_color")
+  secondaryColor         String    @default("#1E3A5F") @map("secondary_color")
+  accentColor            String    @default("#E23A2E") @map("accent_color")
+  backgroundColor        String    @default("#0B1220") @map("background_color")
+  textColor              String    @default("#F7F4EE") @map("text_color")
+  /**
+   * OverlayFontId: serif | sans | display | modern
+   */
+  headingFont            String    @default("modern") @map("heading_font")
+  bodyFont               String    @default("sans") @map("body_font")
+  /**
+   * When the website was last scraped for brand profile (B2B)
+   */
+  websiteScrapedAt       DateTime? @map("website_scraped_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("brand_settings")
+}
+
+/// Approved historical social creatives used as visual-style references.
+/// This is reference-guided generation, not model training.
+model BrandPosterReference {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  imageUrl   String   @map("image_url")
+  label      String   @default("")
+  styleBrief String   @default("") @map("style_brief")
+  width      Int?
+  height     Int?
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive, createdAt])
+  @@map("brand_poster_references")
+}
+
+// Per-tenant API keys & provider choices (encrypted at rest)
+model ProviderSettings {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique @map("tenant_id")
+  llmProvider          String   @default("openai") @map("llm_provider") // openai | claude
+  llmModel             String   @default("gpt-4o") @map("llm_model")
+  openaiApiKey         String?  @map("openai_api_key")
+  claudeApiKey         String?  @map("claude_api_key")
+  /**
+   * Required for identity-linked Anthropic keys (header anthropic-workspace-id)
+   */
+  claudeWorkspaceId    String?  @map("claude_workspace_id")
+  imageProvider        String   @default("fal") @map("image_provider") // fal | openai
+  falModel             String   @default("fal-ai/flux/dev") @map("fal_model")
+  falApiKey            String?  @map("fal_api_key")
+  /**
+   * auto = Smart Router (play + keywords); manual = always use falModel
+   */
+  imageRoutingMode     String   @default("auto") @map("image_routing_mode") // auto | manual
+  searchProvider       String   @default("tavily") @map("search_provider")
+  tavilyApiKey         String?  @map("tavily_api_key")
+  serpapiApiKey        String?  @map("serpapi_api_key")
+  scrapingProvider     String   @default("apify") @map("scraping_provider")
+  apifyApiToken        String?  @map("apify_api_token")
+  /**
+   * Placid Creative Automation API token (Brand Studio template import)
+   */
+  placidApiKey         String?  @map("placid_api_key")
+  notificationProvider String   @default("slack") @map("notification_provider")
+  slackWebhookUrl      String?  @map("slack_webhook_url")
+  teamsWebhookUrl      String?  @map("teams_webhook_url")
+  /**
+   * Resend API key for email alerts (encrypted at rest)
+   */
+  resendApiKey         String?  @map("resend_api_key")
+  /**
+   * Where to send email alerts (admin inbox)
+   */
+  notificationEmail    String?  @map("notification_email")
+  soundAlertsEnabled   Boolean  @default(true) @map("sound_alerts_enabled")
+  /**
+   * Trends workflow: manual = pick sources first; auto = full pipeline on click
+   */
+  trendsMode           String   @default("manual") @map("trends_mode") // manual | auto
+  /**
+   * Competitor Monitor: manual = pick scraped post; auto = pick best + generate
+   */
+  competitorMode       String   @default("manual") @map("competitor_mode") // manual | auto
+  /**
+   * Competitor visuals:
+   * new_topic = fresh AI image from caption/topic
+   * near_mirror = reuse the scraped post’s exact photo (no AI image gen)
+   */
+  competitorImageMode  String   @default("new_topic") @map("competitor_image_mode") // new_topic | near_mirror
+  /**
+   * Newsletter: manual = pick document + rules; auto = rotate docs/templates
+   */
+  newsletterMode       String   @default("manual") @map("newsletter_mode") // manual | auto
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("provider_settings")
+}
+
+enum AppNotificationKind {
+  info
+  success
+  error
+  warning
+}
+
+model AppNotification {
+  id        String              @id @default(uuid())
+  tenantId  String              @map("tenant_id")
+  userId    String?             @map("user_id")
+  kind      AppNotificationKind @default(info)
+  title     String
+  message   String              @default("")
+  href      String?
+  readAt    DateTime?           @map("read_at")
+  deletedAt DateTime?           @map("deleted_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, readAt])
+  @@map("app_notifications")
+}
+
+model Topic {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  name           String
+  searchKeywords String    @default("") @map("search_keywords")
+  isActive       Boolean   @default(true) @map("is_active")
+  rotationOrder  Int       @default(0) @map("rotation_order")
+  lastUsedAt     DateTime? @map("last_used_at")
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedContents GeneratedContent[]
+
+  @@index([tenantId, isActive, lastUsedAt])
+  @@index([tenantId, deletedAt])
+  @@map("topics")
+}
+
+enum SocialPlatform {
+  instagram
+  linkedin
+  facebook
+  twitter
+}
+
+model Competitor {
+  id            String         @id @default(uuid())
+  tenantId      String         @map("tenant_id")
+  name          String
+  handle        String
+  platform      SocialPlatform
+  profileUrl    String?        @map("profile_url")
+  /**
+   * Optional URLs per network: { instagram, facebook, linkedin, twitter, youtube, tiktok, website }
+   */
+  socialUrls    Json           @default("{}") @map("social_urls")
+  isActive      Boolean        @default(true) @map("is_active")
+  rotationOrder Int            @default(0) @map("rotation_order")
+  lastUsedAt    DateTime?      @map("last_used_at")
+  deletedAt     DateTime?      @map("deleted_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  tenant            Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedContents GeneratedContent[]
+  scrapedPosts      ScrapedCompetitorPost[]
+
+  @@index([tenantId, isActive, lastUsedAt])
+  @@index([tenantId, deletedAt])
+  @@map("competitors")
+}
+
+model ScrapedCompetitorPost {
+  id            String         @id @default(uuid())
+  competitorId  String         @map("competitor_id")
+  tenantId      String         @map("tenant_id")
+  platform      SocialPlatform
+  content       String         @default("")
+  postUrl       String?        @map("post_url")
+  imageUrls     String[]       @default([]) @map("image_urls")
+  comments      Json           @default("[]")
+  likes         Int            @default(0)
+  commentsCount Int            @default(0) @map("comments_count")
+  shares        Int            @default(0)
+  postedAt      DateTime?      @map("posted_at")
+  deletedAt     DateTime?      @map("deleted_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@index([competitorId, createdAt])
+  @@map("scraped_competitor_posts")
+}
+
+/// Retained Trends / Memes discover results (same idea as ScrapedCompetitorPost).
+/// Survives page reload and redeploy; refreshed scrapes upsert by externalKey.
+model ScrapedDiscoverItem {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  /// trends | meme
+  kind         String
+  /// Stable dedupe key within tenant+kind (usually URL or candidate hash)
+  externalKey  String    @map("external_key")
+  title        String
+  url          String    @default("")
+  snippet      String    @default("")
+  source       String    @default("")
+  imageUrls    String[]  @default([]) @map("image_urls")
+  publishedAt  DateTime? @map("published_at")
+  /// Kind-specific fields (topicId, country, suggestedFormatId, postText, …)
+  payload      Json      @default("{}")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind, externalKey])
+  @@index([tenantId, kind, createdAt])
+  @@index([tenantId, deletedAt])
+  @@map("scraped_discover_items")
+}
+
+model ContentLibraryItem {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  title           String
+  category        String    @default("")
+  filePath        String    @map("file_path")
+  fileType        String    @map("file_type")
+  extractedText   String    @default("") @map("extracted_text")
+  /// Free-text rules Claude/OpenAI must follow when using this document
+  generationRules String    @default("") @map("generation_rules") @db.Text
+  isActive        Boolean   @default(true) @map("is_active")
+  rotationOrder   Int       @default(0) @map("rotation_order")
+  lastUsedAt      DateTime? @map("last_used_at")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedContents GeneratedContent[]
+
+  @@index([tenantId, isActive, lastUsedAt])
+  @@index([tenantId, deletedAt])
+  @@map("content_library_items")
+}
+
+/// Product newsletter: static format with designated AI fill zones only (e.g. {{headline}}, {{body}})
+model NewsletterTemplate {
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  name             String
+  /// Full post body with {{slot}} placeholders. Non-slot text stays static.
+  bodyTemplate     String    @map("body_template") @db.Text
+  headlineTemplate String    @default("{{headline}}") @map("headline_template")
+  /// JSON array of slot ids AI may fill, e.g. ["headline","body","cta","hashtags"]
+  fillZones        Json      @default("[]") @map("fill_zones")
+  /// Optional product/context notes for the AI
+  productContext   String    @default("") @map("product_context") @db.Text
+  /// Extra generation rules for this newsletter format (tone, structure, CTAs)
+  generationRules  String    @default("") @map("generation_rules") @db.Text
+  isActive         Boolean   @default(true) @map("is_active")
+  rotationOrder    Int       @default(0) @map("rotation_order")
+  lastUsedAt       DateTime? @map("last_used_at")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedContents GeneratedContent[]
+
+  @@index([tenantId, isActive, lastUsedAt])
+  @@index([tenantId, deletedAt])
+  @@map("newsletter_templates")
+}
+
+/// Uploaded finished-poster masters for an AI Assistant play (offer, launch, …).
+/// When any exist for a playId, the picker lists these instead of coded builtins.
+model PlayPosterTemplate {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  /// Playbook play id, e.g. offer | launch | countdown
+  playId         String    @map("play_id")
+  label          String
+  tagline        String    @default("Exact finished look — Brand Kit + your text fill this plate.")
+  /// Always uploaded_master in catalog; fillLayout selects the fill engine.
+  layout         String    @default("uploaded_master")
+  /// Engine used at generate time: sale_circles | sale_split | uploaded_master | …
+  fillLayout     String    @default("uploaded_master") @map("fill_layout")
+  previewUrl     String    @map("preview_url")
+  sourceImageUrl String    @map("source_image_url")
+  sortOrder      Int       @default(0) @map("sort_order")
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, playId, deletedAt])
+  @@map("play_poster_templates")
+}
+
+/// Brand visual templates — free in-house canvas OR optional Placid
+model BrandTemplate {
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  name             String
+  /// inhouse (free) | placid (paid API when key set)
+  provider         String    @default("inhouse")
+  /// Canvas JSON for in-house SVG renderer (width, height, background, layers)
+  canvas           Json      @default("{}")
+  /// Placid template UUID when provider=placid
+  placidTemplateId String?   @map("placid_template_id")
+  backgroundUrl    String?   @map("background_url")
+  previewUrl       String?   @map("preview_url")
+  isActive         Boolean   @default(true) @map("is_active")
+  rotationOrder    Int       @default(0) @map("rotation_order")
+  lastUsedAt       DateTime? @map("last_used_at")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  generatedContents   GeneratedContent[]
+  automationWorkflows AutomationWorkflow[]
+
+  @@index([tenantId, deletedAt])
+  @@map("brand_templates")
+}
+
+/// Settings → Automation: scheduled triggers for newsletter / competitor / trends / meme engines
+model AutomationWorkflow {
+  id                    String    @id @default(uuid())
+  tenantId              String    @map("tenant_id")
+  name                  String?
+  /// once | weekly
+  scheduleType          String    @map("schedule_type")
+  /// Absolute run time when scheduleType=once
+  runAt                 DateTime? @map("run_at")
+  /// 0=Sunday … 6=Saturday when scheduleType=weekly
+  weeklyDay             Int?      @map("weekly_day")
+  /// Local wall-clock HH:mm when scheduleType=weekly
+  weeklyTime            String?   @map("weekly_time")
+  timezone              String    @default("UTC")
+  /// newsletter | competitor | trends | meme | calendar
+  jobType               String    @map("job_type")
+  /// When jobType=calendar: saved_plan | festival | ai_plan | uploaded_plan
+  calendarMode          String    @default("festival") @map("calendar_mode")
+  /// Festival filters: { regions?: string[], categories?: string[] }
+  calendarFilters       Json      @default("{}") @map("calendar_filters")
+  /// When jobType=calendar + calendarMode=saved_plan: which ContentCalendarPlan to pull ideas from
+  contentCalendarPlanId String?   @map("content_calendar_plan_id")
+  /// existing | random | none | rotate
+  templateMode          String    @map("template_mode")
+  brandTemplateId       String?   @map("brand_template_id")
+  /// When templateMode=rotate: ordered pool of brand template IDs; may include "__ai__" for AI-only generations
+  brandTemplateIds      Json      @default("[]") @map("brand_template_ids")
+  /// Round-robin cursor for templateMode=rotate
+  rotateCursor          Int       @default(0) @map("rotate_cursor")
+  /// fixed | rotate — product/tech documents for newsletter/meme (legacy "none" coerced to rotate at runtime)
+  documentMode          String    @default("rotate") @map("document_mode")
+  /// When documentMode=fixed
+  libraryItemId         String?   @map("library_item_id")
+  /// When documentMode=rotate, optional pool (empty = all active docs)
+  libraryItemIds        Json      @default("[]") @map("library_item_ids")
+  /// Meme creative: existing_template | ai | ai_baked_layout (ignored when a brand template is chosen)
+  visualMode            String    @default("ai") @map("visual_mode")
+  /// Meme: force a format archetype; empty = read it off the discovered meme
+  preferredFormatId     String?   @map("preferred_format_id")
+  /// Meme facts source: product | brand | both
+  contentSource         String    @default("both") @map("content_source")
+  /// Target publish platforms (instagram, linkedin, …)
+  channels              String[]  @default([])
+  requireApproval       Boolean   @default(true) @map("require_approval")
+  enabled               Boolean   @default(true)
+  lastRunAt             DateTime? @map("last_run_at")
+  nextRunAt             DateTime? @map("next_run_at")
+  deletedAt             DateTime? @map("deleted_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  brandTemplate BrandTemplate? @relation(fields: [brandTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([enabled, nextRunAt])
+  @@index([tenantId, deletedAt])
+  @@map("automation_workflows")
+}
+
+/// Uploaded month content plan — entries generate on their date at runTime (timezone).
+model ContentCalendarPlan {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  name            String    @default("Month plan")
+  /// ai | upload — which Content Calendar workflow produced this plan
+  source          String    @default("upload")
+  year            Int
+  month           Int
+  /// Local wall-clock HH:mm when generation starts on each entry's date
+  runTime         String    @default("09:00") @map("run_time")
+  timezone        String    @default("Asia/Kolkata")
+  /// automatic = generate on each date/time | manual = calendar-only until user asks
+  executionMode   String    @default("automatic") @map("execution_mode")
+  /// ai | existing_template
+  visualMode      String    @default("ai") @map("visual_mode")
+  /// Visual style preset id used for AI art (see VISUAL_STYLE_PRESETS)
+  visualStyleId   String    @default("professional_photo") @map("visual_style_id")
+  brandTemplateId String?   @map("brand_template_id")
+  /// active | archived
+  status          String    @default("active")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant  Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries ContentCalendarPlanEntry[]
+
+  @@index([tenantId, deletedAt, year, month])
+  @@map("content_calendar_plans")
+}
+
+model ContentCalendarPlanEntry {
+  id           String    @id @default(uuid())
+  planId       String    @map("plan_id")
+  /// Calendar day YYYY-MM-DD
+  date         String
+  title        String
+  theme        String    @default("")
+  notes        String    @default("")
+  hashtags     String[]  @default([])
+  /// UTC instant when generation should start
+  runAt        DateTime  @map("run_at")
+  /// manual | pending | generating | ready | failed | skipped
+  status       String    @default("pending")
+  contentId    String?   @map("content_id")
+  errorMessage String?   @map("error_message")
+  processedAt  DateTime? @map("processed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  plan ContentCalendarPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@index([planId, date])
+  @@map("content_calendar_plan_entries")
+}
+
+model PlatformConnection {
+  id             String         @id @default(uuid())
+  tenantId       String         @map("tenant_id")
+  platform       SocialPlatform
+  accountName    String         @map("account_name")
+  accessToken    String         @map("access_token")
+  refreshToken   String?        @map("refresh_token")
+  tokenExpiresAt DateTime?      @map("token_expires_at")
+  accountId      String?        @map("account_id")
+  isActive       Boolean        @default(true) @map("is_active")
+  deletedAt      DateTime?      @map("deleted_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, platform, accountId])
+  @@map("platform_connections")
+}
+
+enum ContentEngine {
+  trends
+  competitor
+  library
+  newsletter
+  brand_chat
+  calendar
+  meme
+  carousel
+}
+
+enum ContentStatus {
+  generating
+  assistant_draft
+  pending_approval
+  approved
+  scheduled
+  rejected
+  publishing
+  published
+  failed
+  manual_intervention
+}
+
+model GeneratedContent {
+  id                   String           @id @default(uuid())
+  tenantId             String           @map("tenant_id")
+  engine               ContentEngine
+  status               ContentStatus    @default(generating)
+  headline             String           @default("")
+  body                 String           @default("")
+  hashtags             String[]         @default([])
+  callToAction         String?          @map("call_to_action")
+  /**
+   * Platform-specific caption variants for publish.
+   * Shape: { instagram?: { headline, body, hashtags[], callToAction? }, linkedin?: { ... } }
+   */
+  platformCaptions     Json?            @map("platform_captions")
+  imageUrl             String?          @map("image_url")
+  imagePrompt          String?          @map("image_prompt")
+  /**
+   * Raw AI art before logo/overlay frame (for re-framing without regenerating)
+   */
+  rawImageUrl          String?          @map("raw_image_url")
+  /**
+   * Brand template dynamic slot values used to render imageUrl (text + image URLs)
+   */
+  templateSlots        Json?            @map("template_slots")
+  sourceReference      String?          @map("source_reference")
+  targetPlatforms      SocialPlatform[] @default([]) @map("target_platforms")
+  revisionCount        Int              @default(0) @map("revision_count")
+  topicId              String?          @map("topic_id")
+  competitorId         String?          @map("competitor_id")
+  libraryItemId        String?          @map("library_item_id")
+  newsletterTemplateId String?          @map("newsletter_template_id")
+  brandTemplateId      String?          @map("brand_template_id")
+  /**
+   * When set with status=scheduled, publish job runs at this time
+   */
+  scheduledAt          DateTime?        @map("scheduled_at")
+  publishedAt          DateTime?        @map("published_at")
+  publishError         String?          @map("publish_error")
+  deletedAt            DateTime?        @map("deleted_at")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  topic              Topic?              @relation(fields: [topicId], references: [id])
+  competitor         Competitor?         @relation(fields: [competitorId], references: [id])
+  libraryItem        ContentLibraryItem? @relation(fields: [libraryItemId], references: [id])
+  newsletterTemplate NewsletterTemplate? @relation(fields: [newsletterTemplateId], references: [id])
+  brandTemplate      BrandTemplate?      @relation(fields: [brandTemplateId], references: [id])
+  approvals          ApprovalDecision[]
+  publishLogs        PublishLog[]
+  executionLogs      ExecutionLog[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, scheduledAt])
+  @@map("generated_contents")
+}
+
+/// A persistent AI Assistant workspace. Messages and draft artifacts remain
+/// available after refresh; nothing enters Approvals until the user submits it.
+model AssistantConversation {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  title           String    @default("New conversation")
+  activeContentId String?   @map("active_content_id")
+  status          String    @default("active")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages AssistantMessage[]
+
+  @@index([tenantId, updatedAt])
+  @@index([tenantId, deletedAt])
+  @@map("assistant_conversations")
+}
+
+model AssistantMessage {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  tenantId       String   @map("tenant_id")
+  role           String
+  content        String   @db.Text
+  attachmentUrl  String?  @map("attachment_url")
+  attachmentRole String?  @map("attachment_role")
+  contentId      String?  @map("content_id")
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("assistant_messages")
+}
+
+/// Explicit, reviewable long-term memory. Stored only when the tenant toggle is
+/// on; each item can be deleted independently or cleared in one action.
+model AssistantMemory {
+  id                   String   @id @default(uuid())
+  tenantId             String   @map("tenant_id")
+  key                  String
+  value                String   @db.Text
+  category             String   @default("preference")
+  sourceConversationId String?  @map("source_conversation_id")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId, isActive, updatedAt])
+  @@map("assistant_memories")
+}
+
+enum ApprovalAction {
+  approve
+  reject_regenerate
+  reject_edit
+}
+
+model ApprovalDecision {
+  id            String           @id @default(uuid())
+  contentId     String           @map("content_id")
+  reviewerId    String           @map("reviewer_id")
+  action        ApprovalAction
+  feedback      String?
+  editedContent Json?            @map("edited_content")
+  platforms     SocialPlatform[] @default([])
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  content  GeneratedContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  reviewer User             @relation(fields: [reviewerId], references: [id])
+
+  @@index([contentId])
+  @@map("approval_decisions")
+}
+
+model PublishLog {
+  id             String         @id @default(uuid())
+  contentId      String         @map("content_id")
+  platform       SocialPlatform
+  status         String
+  platformPostId String?        @map("platform_post_id")
+  postUrl        String?        @map("post_url")
+  errorMessage   String?        @map("error_message")
+  pollAttempts   Int            @default(0) @map("poll_attempts")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  content GeneratedContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([contentId])
+  @@map("publish_logs")
+}
+
+enum ExecutionStatus {
+  running
+  success
+  transient_failure
+  hard_failure
+}
+
+model ExecutionLog {
+  id           String          @id @default(uuid())
+  tenantId     String          @map("tenant_id")
+  contentId    String?         @map("content_id")
+  workflowStep String          @map("workflow_step")
+  engine       ContentEngine?
+  status       ExecutionStatus @default(running)
+  message      String?
+  errorDetails Json?           @map("error_details")
+  durationMs   Int?            @map("duration_ms")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  content GeneratedContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@map("execution_logs")
+}
+
+model SecurityLog {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  event     String
+  ipAddress String?  @map("ip_address")
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@map("security_logs")
+}
+
+/// Persistent auth sessions — survives API restarts (MemoryStore does not)
+model AuthSession {
+  sid       String   @id
+  data      String   @db.Text
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}

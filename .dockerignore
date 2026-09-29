@@ -1,0 +1,46 @@
+# Keep the build context small and host-independent.
+# Without this, `COPY . .` in the Dockerfiles overwrites the Linux
+# node_modules installed in the deps stage with host-native binaries
+# (sharp-darwin-*, libquery_engine-darwin.dylib.node) and bakes secrets
+# and generated media into the image.
+
+# Secrets — never bake into an image layer
+.env
+.env.*
+!.env.example
+
+# Host-native dependencies and build output (rebuilt inside the image)
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.turbo
+coverage
+
+# Runtime data that belongs on a volume, not in the image
+uploads
+**/uploads
+data
+
+# Local database artifacts
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+apps/api/prisma/dev.db*
+
+# Tooling / VCS / editor noise
+.git
+.gitignore
+.github
+.vscode
+.idea
+.cursor
+*.log
+*.pem
+.DS_Store
+
+# Docs and compose file are not needed inside the image
+docker-compose.yml
+DEPLOY.md
+README.md
